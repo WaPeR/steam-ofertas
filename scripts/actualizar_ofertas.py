@@ -1,129 +1,114 @@
-"""Descarga ofertas Steam de España y Ucrania sin conversiones."""
+"""Ofertas nativas de Steam Ucrania. No usa ITAD ni convierte precios."""
 import json
-import os
+import re
 import sys
 import time
 from pathlib import Path
 from datetime import datetime, timezone
-from urllib.parse import quote, quote_plus, urlparse
 from decimal import Decimal
 import requests
+from bs4 import BeautifulSoup
 
 DATA = Path(__file__).resolve().parent.parent / 'data'
-KEY = os.environ.get('ITAD_API_KEY', '').strip()
-REGIONES = [('ES', 'España', 'EUR'), ('UA', 'Ucrania', 'UAH')]
-MAX_PAGINAS = 1000
-PAUSA = 7
+REGIONES = [('ua', 'Ucrania', 'UAH')]
 
-def seguro(texto):
-    texto = str(texto)
-    if KEY:
-        for valor in (KEY, quote(KEY, safe=''), quote_plus(KEY)):
-            texto = texto.replace(valor, '[OCULTO]')
-    return ''.join(c if c.isprintable() else ' ' for c in texto)[:500]
+def dinero(texto):
+    if '₴' not in texto:
+        raise ValueError('Precio sin símbolo UAH: ' + texto)
+    limpio = re.sub(r'[\s\u00a0\u202f₴]', '', texto).replace(',', '.')
+    if not re.fullmatch(r'\d+(?:\.\d{1,2})?', limpio):
+        raise ValueError('Formato monetario no reconocido: ' + texto)
+    return Decimal(limpio)
 
-def https(valor):
-    if not isinstance(valor, str):
-        return None
-    p = urlparse(valor)
-    return valor if p.scheme == 'https' and p.netloc else None
-
-def importe(p):
-    n = Decimal(str(p['amount']))
-    if not n.is_finite() or n < 0:
-        raise ValueError('Importe inválido')
-    return float(n)
-
-def normalizar(e, divisa):
-    d = e['deal']
-    if str(d['shop']['id']) != '61':
-        return None
-    p, r = d['price'], d['regular']
-    if p.get('currency') != divisa or r.get('currency') != divisa:
-        raise ValueError('La divisa recibida no coincide con ' + divisa)
-    cut = float(d['cut'])
-    if not 0 <= cut <= 100:
-        raise ValueError('Descuento inválido')
-    if cut == 0:
-        return None
-    url = https(d.get('url'))
-    if not url or not e.get('id') or not e.get('title'):
-        raise ValueError('Oferta sin identificador, título o enlace HTTPS')
-    assets = e.get('assets') or {}
-    imagen = next((u for k in ('banner400', 'banner300', 'boxart') if (u := https(assets.get(k)))), None)
-    return {'id': str(e['id']), 'nombre': e['title'], 'tipo': e.get('type'), 'url': url, 'url_steam': url, 'imagen': imagen, 'tienda': 'Steam', 'divisa': divisa, 'precio_final': importe(p), 'precio_original': importe(r), 'descuento': cut, 'caduca': d.get('expiry')}
-
-def consultar(session, pais, offset):
-    params = {'country': pais, 'shops': 61, 'sort': '-cut', 'limit': 100, 'offset': offset}
+def obtener(s, pais, inicio):
+    params = {'cc': pais, 'l': 'english', 'specials': 1, 'category1': 998, 'start': inicio, 'count': 100, 'infinite': 1, 'filter': 'all'}
     for intento in range(3):
-        time.sleep(PAUSA)
+        time.sleep(7)
         try:
-            r = session.get('https://api.isthereanydeal.com/deals/v2', params=params, timeout=45, allow_redirects=False)
+            r = s.get('https://store.steampowered.com/search/results/', params=params, timeout=45)
+            if r.status_code == 429 or r.status_code >= 500:
+                if intento < 2:
+                    time.sleep(60)
+                    continue
+            r.raise_for_status()
+            d = r.json()
+            if not isinstance(d, dict) or not isinstance(d.get('results_html'), str):
+                raise ValueError('Steam no devuelve resultados HTML en JSON')
+            total = int(d['total_count'])
+            if total < 0:
+                raise ValueError('Total inválido')
+            return d['results_html'], total
         except requests.RequestException:
-            if intento < 2:
-                continue
-            raise RuntimeError('Error de conexión; se conservan los datos anteriores') from None
-        if r.status_code == 429 or 500 <= r.status_code < 600:
-            if intento < 2:
-                espera = r.headers.get('Retry-After', '')
-                time.sleep(min(300, max(60, int(espera))) if espera.isdigit() else 60)
-                continue
-        if r.status_code != 200:
-            mensaje = ''
-            try:
-                body = r.json()
-                mensaje = body.get('reason_phrase', '') if isinstance(body, dict) else ''
-            except ValueError:
-                pass
-            raise RuntimeError(f'{pais}: HTTP {r.status_code}: {seguro(mensaje)}')
-        datos = r.json()
-        if not isinstance(datos, dict) or not isinstance(datos.get('list'), list) or not isinstance(datos.get('hasMore'), bool):
-            raise ValueError('Respuesta ITAD inesperada')
-        return datos
+            if intento == 2:
+                raise RuntimeError('Error HTTP o de conexión con Steam; se conservan los datos anteriores') from None
+    raise RuntimeError('No se pudo consultar Steam')
 
-def region(session, pais, nombre, divisa):
-    ofertas, vistos = {}, set()
-    offset = 0
-    mas = False
-    for pagina in range(MAX_PAGINAS):
-        if offset in vistos:
-            raise ValueError('Paginación repetida')
-        vistos.add(offset)
-        datos = consultar(session, pais, offset)
-        for e in datos['list']:
-            o = normalizar(e, divisa)
-            if o:
-                ofertas[o['id']] = o
-        print(f'{pais}: página {pagina + 1}, {len(ofertas)} ofertas', flush=True)
-        mas = datos['hasMore']
-        if not mas:
+def generar(s, pais, nombre, moneda):
+    inicio, ofertas, paginas = 0, {}, set()
+    while True:
+        html, total = obtener(s, pais, inicio)
+        filas = BeautifulSoup(html, 'html.parser').select('a.search_result_row')
+        if not filas:
+            if inicio < total:
+                raise ValueError('Página vacía antes del final; no se publicará un listado parcial')
             break
-        siguiente = datos.get('nextOffset')
-        if type(siguiente) is not int or siguiente <= offset:
-            raise ValueError('nextOffset inválido')
-        offset = siguiente
+        firma = tuple(f.get('href', '') for f in filas)
+        if firma in paginas:
+            raise ValueError('Steam repite una página; se conservan los datos anteriores')
+        paginas.add(firma)
+        for f in filas:
+            ids = f.get('data-ds-appid', '')
+            if not re.fullmatch(r'\d+', ids) or '/app/' not in f.get('href', ''):
+                continue
+            pct = f.select_one('.discount_pct')
+            if pct is None:
+                continue
+            coincidencia = re.fullmatch(r'-?(\d+)%', pct.get_text(strip=True))
+            if not coincidencia:
+                raise ValueError('Formato de descuento inesperado')
+            descuento = int(coincidencia.group(1))
+            if descuento < 50:
+                continue
+            if descuento > 100:
+                raise ValueError('Descuento inválido')
+            final = f.select_one('.discount_final_price')
+            original = f.select_one('.discount_original_price')
+            titulo = f.select_one('.title')
+            if final is None or original is None or titulo is None:
+                raise ValueError('Faltan título o precios; posible cambio de formato de Steam')
+            p, anterior = dinero(final.get_text()), dinero(original.get_text())
+            if anterior <= 0 or p > anterior:
+                raise ValueError('Importes incoherentes')
+            if abs((anterior - p) / anterior * 100 - descuento) > 2:
+                raise ValueError('Precio y descuento no coinciden')
+            ofertas[ids] = {'id': ids, 'nombre': titulo.get_text(strip=True), 'tipo': 'game', 'url': f'https://store.steampowered.com/app/{ids}/?cc={pais}', 'url_steam': f'https://store.steampowered.com/app/{ids}/?cc={pais}', 'imagen': f'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{ids}/header.jpg', 'tienda': 'Steam', 'divisa': moneda, 'precio_final': float(p), 'precio_original': float(anterior), 'descuento': descuento}
+        inicio += len(filas)
+        print(f'{pais}: {inicio}/{total} resultados examinados; {len(ofertas)} ofertas >=50%', flush=True)
+        if inicio >= total:
+            break
+        if len(paginas) >= 1000:
+            raise ValueError('Límite de seguridad; no se publicará un listado parcial')
     if not ofertas:
-        raise ValueError(pais + ': sin ofertas reconocidas; se conservan los datos anteriores')
-    if mas:
-        print(pais + ': límite de seguridad alcanzado; listado marcado como incompleto', flush=True)
-    return {'actualizado': datetime.now(timezone.utc).isoformat(), 'fuente': 'IsThereAnyDeal', 'pais': pais, 'nombre_region': nombre, 'divisa': divisa, 'tienda': 'Steam', 'hay_mas': mas, 'ofertas': sorted(ofertas.values(), key=lambda o: (-o['descuento'], o['nombre'].casefold()))}
+        raise ValueError('No hay ofertas válidas; se conservan los datos anteriores')
+    return {'actualizado': datetime.now(timezone.utc).isoformat(), 'fuente': 'Steam Store', 'pais': pais.upper(), 'nombre_region': nombre, 'divisa': moneda, 'tienda': 'Steam', 'hay_mas': False, 'descuento_minimo': 50, 'ofertas': sorted(ofertas.values(), key=lambda o: (-o['descuento'], o['nombre'].casefold()))}
 
 def main():
-    if not KEY:
-        raise ValueError('Falta ITAD_API_KEY')
-    with requests.Session() as s:
-        s.headers.update({'ITAD-API-Key': KEY, 'User-Agent': 'OfertasSteamPersonal/1.0', 'Accept': 'application/json'})
-        pendientes = {pais: region(s, pais, nombre, divisa) for pais, nombre, divisa in REGIONES}
     DATA.mkdir(parents=True, exist_ok=True)
-    for pais, datos in pendientes.items():
-        destino = DATA / f'ofertas-{pais.lower()}.json'
-        temporal = destino.with_suffix('.json.tmp')
-        temporal.write_text(json.dumps(datos, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
-        temporal.replace(destino)
+    errores = []
+    with requests.Session() as s:
+        s.headers.update({'User-Agent': 'SteamOfertasPersonal/2.0', 'Accept-Language': 'en-US,en;q=0.9'})
+        for pais, nombre, moneda in REGIONES:
+            try:
+                datos = generar(s, pais, nombre, moneda)
+                destino = DATA / f'ofertas-{pais}.json'
+                temporal = destino.with_suffix('.json.tmp')
+                temporal.write_text(json.dumps(datos, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
+                temporal.replace(destino)
+                print(f'Guardado {pais}: {len(datos["ofertas"])} ofertas', flush=True)
+            except Exception as e:
+                errores.append(pais)
+                print(f'ERROR {pais}: {e}', flush=True)
+    return 1 if errores else 0
 
 if __name__ == '__main__':
-    try:
-        main()
-    except Exception as e:
-        print('ERROR: ' + seguro(e), flush=True)
-        sys.exit(1)
+    sys.exit(main())

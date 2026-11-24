@@ -1,50 +1,27 @@
 <!doctype html>
 <html lang="es">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ofertas diarias de Steam</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ofertas Steam Ucrania</title>
 <link rel="stylesheet" href="assets/style.css">
+<style>[hidden]{display:none!important}#mas{display:block;margin:1.5rem auto;padding:.8rem 2rem;cursor:pointer}.equivalente-eur{font-size:.9em}</style>
 </head>
 <body>
-<header>
-  <h1>Ofertas diarias de Steam</h1>
-  <p id="fecha"></p>
-</header>
-
+<header><h1>Ofertas Steam Ucrania</h1><p id="fecha"></p></header>
 <main>
-  <section class="filtros">
-    <input id="busqueda" type="search" placeholder="Buscar juego...">
-    <select id="region" aria-label="Región y divisa">
-      <option value="es" selected>España — Euro (EUR)</option>
-      <option value="ua">Ucrania — Grivna (UAH)</option>
-      <option value="tr">Turquía — Lira (TRY)</option>
-      <option value="us">Estados Unidos — Dólar (USD)</option>
-    </select>
-    <select id="orden" aria-label="Ordenar">
-      <option value="descuento">Mayor descuento</option>
-      <option value="precio">Precio más bajo</option>
-      <option value="nombre">Nombre A-Z</option>
-    </select>
-    <label><input id="soloOfertas" type="checkbox" checked> Solo ofertas</label>
-  </section>
-
-  <p id="aviso" class="aviso">
-    Los precios se obtienen directamente para la región seleccionada; no son conversiones de divisa.
-  </p>
-
-  <section id="resultados" class="grid"></section>
-  <p id="vacio" hidden>No hay ofertas que coincidan con el filtro.</p>
+<section class="filtros">
+<input id="busqueda" type="search" placeholder="Buscar juego..." aria-label="Buscar juego">
+<select id="region" aria-label="Región"><option value="ua">Ucrania (UAH)</option></select>
+<select id="tipo" aria-label="Tipo de producto"><option value="">Todos los tipos disponibles</option><option value="game">Juegos</option></select>
+<select id="orden" aria-label="Ordenar"><option value="descuento">Mayor descuento</option><option value="precio">Precio más bajo</option><option value="nombre">Nombre A-Z</option></select>
+<span>Descuento mínimo: 50 %</span>
+</section>
+<p id="aviso" class="aviso">Precios nativos de Steam Ucrania. Solo juegos con descuento de al menos el 50 %.</p>
+<p id="contador" role="status"></p>
+<section id="resultados" class="grid"></section>
+<p id="vacio" hidden>No hay ofertas que coincidan.</p>
+<button id="mas" type="button" hidden>Ver más</button>
 </main>
-
-<footer>
-  <p>
-    Ofertas obtenidas mediante la API de
-    <a href="https://isthereanydeal.com/" target="_blank" rel="noopener">IsThereAnyDeal</a>.
-    Solo se muestran ofertas de la tienda oficial de Steam.
-  </p>
-</footer>
-
+<footer><p>Fuente de precios: Steam Store. Conversión EUR orientativa: Banco Nacional de Ucrania.</p><p id="cambio"></p></footer>
 <script src="assets/app.js"></script>
-</body>
-</html>
+</body></html>
