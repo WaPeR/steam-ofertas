@@ -1,0 +1,71 @@
+name: Diagnóstico autenticación ITAD
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/diagnostico-itad.yml'
+permissions:
+  contents: read
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comparar cabecera y parámetro sin publicar datos
+        env:
+          ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
+        shell: python
+        run: |
+          import os, json, time
+          from urllib.request import Request, build_opener, HTTPRedirectHandler
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode, quote, quote_plus
+          key = os.environ.get('ITAD_API_KEY', '').strip()
+          if not key:
+              raise SystemExit('Falta ITAD_API_KEY; prueba cancelada.')
+          if '*' in key or any(c.isspace() for c in key):
+              raise SystemExit('La credencial contiene asteriscos o espacios internos; revisar copia en privado.')
+          class SinRedireccion(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          opener = build_opener(SinRedireccion())
+          def ocultar(text):
+              for value in (key, quote(key, safe=''), quote_plus(key)):
+                  text = text.replace(value, '[OCULTO]')
+              return ''.join(c if c.isprintable() else ' ' for c in text)[:250]
+          casos = [('lookup', '/games/lookup/v1', {'appid': 1091500}), ('ofertas', '/deals/v2', {'country': 'ES', 'shops': 61, 'limit': 1})]
+          resultados = []
+          for nombre, ruta, base in casos:
+              for modo in ('cabecera', 'parametro'):
+                  params = dict(base)
+                  headers = {'User-Agent': 'SteamOfertas-Diagnostico/1.0', 'Accept': 'application/json'}
+                  if modo == 'cabecera':
+                      headers['ITAD-API-Key'] = key
+                  else:
+                      params['key'] = key
+                  req = Request('https://api.isthereanydeal.com' + ruta + '?' + urlencode(params), headers=headers)
+                  try:
+                      with opener.open(req, timeout=30) as r:
+                          status, body = r.status, r.read(16384)
+                  except HTTPError as e:
+                      status, body = e.code, e.read(16384)
+                  except (URLError, ValueError, OSError):
+                      print(nombre, modo, 'error de conexión; detalles omitidos para proteger la clave', flush=True)
+                      resultados.append((nombre, modo, None))
+                      continue
+                  mensaje = ''
+                  try:
+                      data = json.loads(body)
+                      if isinstance(data, dict):
+                          reason = data.get('reason_phrase')
+                          if isinstance(reason, str):
+                              mensaje = ocultar(reason)
+                  except (ValueError, UnicodeError):
+                      mensaje = 'Respuesta no JSON; contenido omitido'
+                  print(f'{nombre} | {modo} | HTTP {status} | {mensaje}', flush=True)
+                  resultados.append((nombre, modo, status))
+                  time.sleep(2)
+          print('Prueba terminada. No se han escrito datos ni desplegado la web. Un HTTP 200 en lookup no prueba por sí solo que la clave sea válida.')
+          print('Comparar resultados por endpoint; 401/403 en ambos modos requiere revisar credencial o acceso con ITAD. 404/400 indica ruta o parámetros, no clave inválida necesariamente.')
+          if not any(n == 'ofertas' and s == 200 for n, m, s in resultados):
+              raise SystemExit(1)
