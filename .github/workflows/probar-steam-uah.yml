@@ -1,0 +1,32 @@
+name: Probar precios Steam UAH
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Consultar tres juegos para Ucrania
+        run: python scripts/probar_steam_uah.py --salida diagnostico/prueba-steam-uah.json
+
+      - name: Conservar informe de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-steam-uah
+          path: diagnostico/prueba-steam-uah.json
+          if-no-files-found: warn
+          retention-days: 7
