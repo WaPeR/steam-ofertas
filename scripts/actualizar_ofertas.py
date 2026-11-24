@@ -1,172 +1,129 @@
-"""Obtiene ofertas Steam de ITAD sin convertir divisas."""
+"""Descarga ofertas Steam de España y Ucrania sin conversiones."""
 import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from datetime import datetime, timezone
 from urllib.parse import quote, quote_plus, urlparse
+from decimal import Decimal
 import requests
 
 DATA = Path(__file__).resolve().parent.parent / 'data'
-API_URL = 'https://api.isthereanydeal.com/deals/v2'
-STEAM_SHOP_ID = 61
-REGIONES = [('ES', 'España'), ('UA', 'Ucrania'), ('TR', 'Turquía'), ('US', 'Estados Unidos')]
-LIMITE = 100
-MAX_PAGINAS = 3
-PAUSA = 2
-API_KEY = os.environ.get('ITAD_API_KEY', '').strip()
+KEY = os.environ.get('ITAD_API_KEY', '').strip()
+REGIONES = [('ES', 'España', 'EUR'), ('UA', 'Ucrania', 'UAH')]
+MAX_PAGINAS = 1000
+PAUSA = 7
 
-def ocultar_secreto(texto):
+def seguro(texto):
     texto = str(texto)
-    if API_KEY:
-        for variante in (API_KEY, quote(API_KEY, safe=''), quote_plus(API_KEY)):
-            texto = texto.replace(variante, '[CLAVE OCULTA]')
-    return ''.join(c if c.isprintable() or c == '\n' else ' ' for c in texto)[:2000]
+    if KEY:
+        for valor in (KEY, quote(KEY, safe=''), quote_plus(KEY)):
+            texto = texto.replace(valor, '[OCULTO]')
+    return ''.join(c if c.isprintable() else ' ' for c in texto)[:500]
 
-def importe(objeto):
-    if not isinstance(objeto, dict) or objeto.get('amount') is None:
-        raise ValueError('Falta amount en un precio.')
-    try:
-        numero = Decimal(str(objeto['amount']))
-    except InvalidOperation:
-        raise ValueError('Importe no numérico.') from None
-    if not numero.is_finite() or numero < 0:
-        raise ValueError('Importe inválido.')
-    return float(numero)
-
-def url_https(valor):
+def https(valor):
     if not isinstance(valor, str):
         return None
-    partes = urlparse(valor)
-    return valor if partes.scheme == 'https' and partes.netloc else None
+    p = urlparse(valor)
+    return valor if p.scheme == 'https' and p.netloc else None
+
+def importe(p):
+    n = Decimal(str(p['amount']))
+    if not n.is_finite() or n < 0:
+        raise ValueError('Importe inválido')
+    return float(n)
+
+def normalizar(e, divisa):
+    d = e['deal']
+    if str(d['shop']['id']) != '61':
+        return None
+    p, r = d['price'], d['regular']
+    if p.get('currency') != divisa or r.get('currency') != divisa:
+        raise ValueError('La divisa recibida no coincide con ' + divisa)
+    cut = float(d['cut'])
+    if not 0 <= cut <= 100:
+        raise ValueError('Descuento inválido')
+    if cut == 0:
+        return None
+    url = https(d.get('url'))
+    if not url or not e.get('id') or not e.get('title'):
+        raise ValueError('Oferta sin identificador, título o enlace HTTPS')
+    assets = e.get('assets') or {}
+    imagen = next((u for k in ('banner400', 'banner300', 'boxart') if (u := https(assets.get(k)))), None)
+    return {'id': str(e['id']), 'nombre': e['title'], 'tipo': e.get('type'), 'url': url, 'url_steam': url, 'imagen': imagen, 'tienda': 'Steam', 'divisa': divisa, 'precio_final': importe(p), 'precio_original': importe(r), 'descuento': cut, 'caduca': d.get('expiry')}
 
 def consultar(session, pais, offset):
-    params = {'country': pais, 'shops': STEAM_SHOP_ID, 'sort': '-cut', 'limit': LIMITE, 'offset': offset}
-    print(f'[{pais}] Consultando offset={offset}', flush=True)
-    try:
-        respuesta = session.get(API_URL, params=params, timeout=30, allow_redirects=False)
-    except requests.RequestException:
-        raise RuntimeError(f'[{pais}] Error de conexión con ITAD.') from None
-    print(f'[{pais}] HTTP {respuesta.status_code}', flush=True)
-    if respuesta.status_code != 200:
-        mensaje = 'Sin mensaje JSON reconocido.'
+    params = {'country': pais, 'shops': 61, 'sort': '-cut', 'limit': 100, 'offset': offset}
+    for intento in range(3):
+        time.sleep(PAUSA)
         try:
-            error = respuesta.json()
-            if isinstance(error, dict):
-                mensaje = error.get('reason_phrase') or mensaje
-        except ValueError:
-            mensaje = 'El servidor no devolvió JSON.'
-        raise RuntimeError(f'[{pais}] HTTP {respuesta.status_code}: {ocultar_secreto(mensaje)}')
-    try:
-        datos = respuesta.json()
-    except ValueError:
-        raise RuntimeError(f'[{pais}] JSON inválido.') from None
-    if not isinstance(datos, dict) or not isinstance(datos.get('list'), list):
-        raise RuntimeError(f'[{pais}] Estructura de respuesta inesperada.')
-    return datos
-
-def normalizar(entrada):
-    if not isinstance(entrada, dict) or not isinstance(entrada.get('deal'), dict):
-        raise ValueError('Falta el objeto deal.')
-    deal = entrada['deal']
-    tienda = deal.get('shop') or {}
-    if str(tienda.get('id')) != str(STEAM_SHOP_ID):
-        return None
-    identificador = entrada.get('id')
-    titulo = entrada.get('title')
-    enlace = url_https(deal.get('url'))
-    if not identificador or not titulo or not enlace:
-        raise ValueError('Falta id, title o enlace HTTPS.')
-    precio = deal.get('price') or {}
-    regular = deal.get('regular') or {}
-    divisa = precio.get('currency')
-    if not isinstance(divisa, str) or not divisa or regular.get('currency') != divisa:
-        raise ValueError('Divisas ausentes o distintas.')
-    precio_final = importe(precio)
-    precio_original = importe(regular)
-    try:
-        descuento = float(deal['cut'])
-    except (KeyError, TypeError, ValueError):
-        raise ValueError('Descuento inválido.') from None
-    if not 0 <= descuento <= 100:
-        raise ValueError('Descuento fuera de rango.')
-    if descuento <= 0:
-        return None
-    assets = entrada.get('assets') or {}
-    imagen = next((u for campo in ('banner400', 'banner300', 'boxart') if (u := url_https(assets.get(campo)))), None)
-    return {
-        'id': str(identificador), 'nombre': titulo, 'url': enlace,
-        'url_steam': enlace, 'imagen': imagen, 'tienda': 'Steam',
-        'divisa': divisa, 'precio_final': precio_final,
-        'precio_original': precio_original, 'descuento': descuento,
-        'caduca': deal.get('expiry'),
-    }
-
-def generar_region(session, pais, nombre):
-    ofertas = {}
-    offset = 0
-    offsets_vistos = set()
-    hay_mas = False
-    for pagina in range(MAX_PAGINAS):
-        if offset in offsets_vistos:
-            raise RuntimeError(f'[{pais}] Offset repetido.')
-        offsets_vistos.add(offset)
-        datos = consultar(session, pais, offset)
-        entradas = datos['list']
-        reconocidas = 0
-        for entrada in entradas:
+            r = session.get('https://api.isthereanydeal.com/deals/v2', params=params, timeout=45, allow_redirects=False)
+        except requests.RequestException:
+            if intento < 2:
+                continue
+            raise RuntimeError('Error de conexión; se conservan los datos anteriores') from None
+        if r.status_code == 429 or 500 <= r.status_code < 600:
+            if intento < 2:
+                espera = r.headers.get('Retry-After', '')
+                time.sleep(min(300, max(60, int(espera))) if espera.isdigit() else 60)
+                continue
+        if r.status_code != 200:
+            mensaje = ''
             try:
-                oferta = normalizar(entrada)
-            except (ValueError, TypeError, AttributeError) as error:
-                raise RuntimeError(f'[{pais}] Error al interpretar una oferta: {error}. No se guardarán datos nuevos.') from None
-            if oferta is not None:
-                ofertas[oferta['id']] = oferta
-                reconocidas += 1
-        print(f'[{pais}] Página {pagina + 1}: recibidas={len(entradas)}, reconocidas={reconocidas}', flush=True)
-        hay_mas = datos.get('hasMore') is True
-        if not hay_mas:
+                body = r.json()
+                mensaje = body.get('reason_phrase', '') if isinstance(body, dict) else ''
+            except ValueError:
+                pass
+            raise RuntimeError(f'{pais}: HTTP {r.status_code}: {seguro(mensaje)}')
+        datos = r.json()
+        if not isinstance(datos, dict) or not isinstance(datos.get('list'), list) or not isinstance(datos.get('hasMore'), bool):
+            raise ValueError('Respuesta ITAD inesperada')
+        return datos
+
+def region(session, pais, nombre, divisa):
+    ofertas, vistos = {}, set()
+    offset = 0
+    mas = False
+    for pagina in range(MAX_PAGINAS):
+        if offset in vistos:
+            raise ValueError('Paginación repetida')
+        vistos.add(offset)
+        datos = consultar(session, pais, offset)
+        for e in datos['list']:
+            o = normalizar(e, divisa)
+            if o:
+                ofertas[o['id']] = o
+        print(f'{pais}: página {pagina + 1}, {len(ofertas)} ofertas', flush=True)
+        mas = datos['hasMore']
+        if not mas:
             break
         siguiente = datos.get('nextOffset')
-        if not isinstance(siguiente, int) or isinstance(siguiente, bool) or siguiente <= offset:
-            raise RuntimeError(f'[{pais}] nextOffset inválido.')
+        if type(siguiente) is not int or siguiente <= offset:
+            raise ValueError('nextOffset inválido')
         offset = siguiente
-        time.sleep(PAUSA)
     if not ofertas:
-        raise RuntimeError(f'[{pais}] Sin ofertas reconocidas; se conservan los archivos anteriores.')
-    divisas = {o['divisa'] for o in ofertas.values()}
-    if len(divisas) != 1:
-        raise RuntimeError(f'[{pais}] Varias divisas: {sorted(divisas)}.')
-    divisa = next(iter(divisas))
-    print(f'[{pais}] {len(ofertas)} ofertas; divisa recibida: {divisa}', flush=True)
-    return {
-        'actualizado': datetime.now(timezone.utc).isoformat(),
-        'fuente': 'IsThereAnyDeal', 'pais': pais, 'nombre_region': nombre,
-        'divisa': divisa, 'tienda': 'Steam', 'hay_mas': hay_mas,
-        'ofertas': sorted(ofertas.values(), key=lambda o: (-o['descuento'], o['nombre'].casefold())),
-    }
+        raise ValueError(pais + ': sin ofertas reconocidas; se conservan los datos anteriores')
+    if mas:
+        print(pais + ': límite de seguridad alcanzado; listado marcado como incompleto', flush=True)
+    return {'actualizado': datetime.now(timezone.utc).isoformat(), 'fuente': 'IsThereAnyDeal', 'pais': pais, 'nombre_region': nombre, 'divisa': divisa, 'tienda': 'Steam', 'hay_mas': mas, 'ofertas': sorted(ofertas.values(), key=lambda o: (-o['descuento'], o['nombre'].casefold()))}
 
 def main():
-    if not API_KEY:
-        raise RuntimeError('Falta ITAD_API_KEY o está vacío.')
-    pendientes = {}
-    with requests.Session() as session:
-        session.headers.update({'ITAD-API-Key': API_KEY, 'User-Agent': 'OfertasSteamPersonal/1.0', 'Accept': 'application/json'})
-        for pais, nombre in REGIONES:
-            pendientes[pais] = generar_region(session, pais, nombre)
-            time.sleep(PAUSA)
+    if not KEY:
+        raise ValueError('Falta ITAD_API_KEY')
+    with requests.Session() as s:
+        s.headers.update({'ITAD-API-Key': KEY, 'User-Agent': 'OfertasSteamPersonal/1.0', 'Accept': 'application/json'})
+        pendientes = {pais: region(s, pais, nombre, divisa) for pais, nombre, divisa in REGIONES}
     DATA.mkdir(parents=True, exist_ok=True)
     for pais, datos in pendientes.items():
-        archivo = DATA / f'ofertas-{pais.lower()}.json'
-        temporal = archivo.with_suffix('.json.tmp')
+        destino = DATA / f'ofertas-{pais.lower()}.json'
+        temporal = destino.with_suffix('.json.tmp')
         temporal.write_text(json.dumps(datos, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
-        temporal.replace(archivo)
-        print(f'Guardado {archivo.name}: {len(datos["ofertas"])} ofertas.', flush=True)
+        temporal.replace(destino)
 
 if __name__ == '__main__':
     try:
         main()
-    except Exception as error:
-        print('ERROR: ' + ocultar_secreto(error), flush=True)
+    except Exception as e:
+        print('ERROR: ' + seguro(e), flush=True)
         sys.exit(1)
