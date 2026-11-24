@@ -1,0 +1,30 @@
+:root{
+  --fondo:#0f1419;
+  --tarjeta:#161d24;
+  --texto:#e6edf3;
+  --acento:#66c0f4;
+  --verde:#4cc38a;
+  --borde:#26303a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fondo);color:var(--texto);font-family:system-ui,sans-serif}
+header{padding:2rem 1rem;text-align:center;border-bottom:1px solid var(--borde)}
+h1{margin:0;color:var(--acento)}
+main{max-width:1100px;margin:auto;padding:1rem}
+.filtros{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem}
+input,select{background:var(--tarjeta);color:var(--texto);border:1px solid var(--borde);border-radius:8px;padding:.6rem}
+#busqueda{flex:1;min-width:220px}
+.aviso{background:#1f2a33;border:1px solid var(--borde);border-radius:8px;padding:.75rem;font-size:.9rem;color:#b8c4ce}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin-top:1rem}
+.card{background:var(--tarjeta);border:1px solid var(--borde);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.card img{width:100%;aspect-ratio:460/215;object-fit:cover;background:#222}
+.card-info{padding:.85rem;display:flex;flex-direction:column;gap:.4rem;flex:1}
+.card h2{font-size:1rem;margin:0}
+.precios{display:flex;align-items:center;gap:.5rem;margin-top:auto;flex-wrap:wrap}
+.descuento{background:var(--verde);color:#08120d;font-weight:700;padding:.2rem .45rem;border-radius:5px}
+.precio-final{font-weight:700}
+.precio-original{color:#8b98a5;text-decoration:line-through;font-size:.85rem}
+.tienda{font-size:.75rem;color:#8b98a5}
+.card a{color:inherit;text-decoration:none}
+footer{padding:1.5rem;text-align:center;color:#8b98a5;font-size:.85rem}
+footer a{color:var(--acento)}

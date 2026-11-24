@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ofertas diarias de Steam</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header>
+  <h1>Ofertas diarias de Steam</h1>
+  <p id="fecha"></p>
+</header>
+
+<main>
+  <section class="filtros">
+    <input id="busqueda" type="search" placeholder="Buscar juego...">
+    <select id="region" aria-label="Región y divisa">
+      <option value="es" selected>España — Euro (EUR)</option>
+      <option value="ua">Ucrania — Grivna (UAH)</option>
+      <option value="tr">Turquía — Lira (TRY)</option>
+      <option value="us">Estados Unidos — Dólar (USD)</option>
+    </select>
+    <select id="orden" aria-label="Ordenar">
+      <option value="descuento">Mayor descuento</option>
+      <option value="precio">Precio más bajo</option>
+      <option value="nombre">Nombre A-Z</option>
+    </select>
+    <label><input id="soloOfertas" type="checkbox" checked> Solo ofertas</label>
+  </section>
+
+  <p id="aviso" class="aviso">
+    Los precios se obtienen directamente para la región seleccionada; no son conversiones de divisa.
+  </p>
+
+  <section id="resultados" class="grid"></section>
+  <p id="vacio" hidden>No hay ofertas que coincidan con el filtro.</p>
+</main>
+
+<footer>
+  <p>
+    Ofertas obtenidas mediante la API de
+    <a href="https://isthereanydeal.com/" target="_blank" rel="noopener">IsThereAnyDeal</a>.
+    Solo se muestran ofertas de la tienda oficial de Steam.
+  </p>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

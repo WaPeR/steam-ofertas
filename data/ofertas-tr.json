@@ -1,0 +1,34 @@
+{
+  "actualizado": "2026-11-24T08:00:00+00:00",
+  "fuente": "IsThereAnyDeal",
+  "pais": "TR",
+  "nombre_region": "Turquía",
+  "divisa": "TRY",
+  "tienda": "Steam",
+  "ofertas": [
+    {
+      "appid": "1091500",
+      "nombre": "Cyberpunk 2077",
+      "url": "https://store.steampowered.com/app/1091500/",
+      "url_steam": "https://store.steampowered.com/app/1091500/",
+      "imagen": "https://cdn.cloudflare.steamstatic.com/steam/apps/1091500/header.jpg",
+      "tienda": "Steam",
+      "divisa": "TRY",
+      "precio_final": 599,
+      "precio_original": 1199,
+      "descuento": 50
+    },
+    {
+      "appid": "1245620",
+      "nombre": "ELDEN RING",
+      "url": "https://store.steampowered.com/app/1245620/",
+      "url_steam": "https://store.steampowered.com/app/1245620/",
+      "imagen": "https://cdn.cloudflare.steamstatic.com/steam/apps/1245620/header.jpg",
+      "tienda": "Steam",
+      "divisa": "TRY",
+      "precio_final": 839,
+      "precio_original": 1199,
+      "descuento": 30
+    }
+  ]
+}
